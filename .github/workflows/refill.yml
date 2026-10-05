@@ -30,4 +30,4 @@ jobs:
           LIDL_USER: ${{ secrets.LIDL_USER }}
           LIDL_PASS: ${{ secrets.LIDL_PASS }}
         run: |
-          python LidlConnect_2.py
+          python LidlConnect.py
