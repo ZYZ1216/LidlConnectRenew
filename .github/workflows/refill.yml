@@ -2,9 +2,8 @@ name: Lidl Auto Refill
 
 on:
   schedule:
-    # Cron 表达式：每小时运行一次（或改为 */30 * * * * 每半小时一次）
     - cron: '0 * * * *'
-  workflow_dispatch: # 允许在 GitHub 网页上手动点击测试运行
+  workflow_dispatch:
 
 jobs:
   check-and-refill:
@@ -31,3 +30,11 @@ jobs:
           LIDL_PASS: ${{ secrets.LIDL_PASS }}
         run: |
           python LidlConnect.py
+
+      # 💡 失败时上传截图辅助排查
+      - name: Upload Screenshot on Failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-screenshots
+          path: '*.png'

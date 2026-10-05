@@ -4,31 +4,47 @@ import sys
 import time
 from playwright.sync_api import Playwright, sync_playwright
 
-# 💡 从 GitLab CI/CD Variables 读取密码，本地测试可保底
 PHONE_NUMBER = os.getenv("LIDL_USER", "")
 PASSWORD = os.getenv("LIDL_PASS", "")
 
 if not PHONE_NUMBER or not PASSWORD:
     print("❌ 错误：未读取到环境变量 LIDL_USER 或 LIDL_PASS！")
-    print("👉 请确保已在 GitLab Settings -> CI/CD -> Variables 中添加这两个变量。")
     sys.exit(1)
 
 TARGET_URL = "https://kundenkonto.lidl-connect.de/mein-lidl-connect/uebersicht.html"
 
 
+def handle_cookie_banner(page):
+    """专门处理 Cookie 弹窗，确保输入框不被遮挡"""
+    try:
+        # 常见 Cookie 按钮匹配（如 "Alle akzeptieren", "Zustimmen", "Akzeptieren"）
+        cookie_btn = page.locator("button").filter(has_text=re.compile(r"akzeptieren|zustimmen|accept", re.I)).first
+        if cookie_btn.is_visible(timeout=3000):
+            cookie_btn.click()
+            print("   🍪 已点击处理 Cookie 弹窗")
+            time.sleep(1)
+    except Exception:
+        pass
+
+
 def do_login_with_verification(page) -> bool:
-    """带状态校验的登录流程"""
+    """带状态校验的登录流程（包含 Cookie 拦截防护）"""
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{timestamp}] 🔑 开始执行登录流程...")
+
+    # 在定位输入框前，先清理 Cookie 弹窗
+    handle_cookie_banner(page)
 
     phone_input = page.get_by_role("textbox", name="Mobilfunknummer")
     pass_input = page.get_by_role("textbox", name="Passwort")
 
     try:
-        phone_input.wait_for(state="visible", timeout=5000)
-        pass_input.wait_for(state="visible", timeout=5000)
+        # 给云端稍微多一点等待时间（8秒）
+        phone_input.wait_for(state="visible", timeout=8000)
+        pass_input.wait_for(state="visible", timeout=8000)
     except Exception:
-        print("   ❌ 无法定位登录输入框，可能不在登录页。")
+        print("   ❌ 无法定位登录输入框，保存当前页面截图以便排查...")
+        page.screenshot(path="login_error.png")
         return False
 
     phone_input.click()
@@ -57,6 +73,7 @@ def do_login_with_verification(page) -> bool:
         return True
     except Exception:
         print("   ❌ 登录提交后 15 秒内未检测到 Refill 按钮（可能触发人机验证或密码错误）。")
+        page.screenshot(path="login_timeout.png")
         return False
 
 
@@ -83,12 +100,15 @@ def get_remaining_data_gb(page) -> float | None:
 
 
 def run_once(page):
-    """单次检测流程（供 GitLab CI 定时任务调用）"""
+    """单次检测流程"""
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{timestamp}] 🔄 开始访问 Lidl Connect...")
 
     page.goto(TARGET_URL, wait_until="domcontentloaded")
     time.sleep(2)
+
+    # 刚进网页也优先尝试关掉 Cookie 弹窗
+    handle_cookie_banner(page)
 
     refill_btn = page.get_by_role("button", name="Datenvolumen per Refill")
 
@@ -120,7 +140,6 @@ def run_once(page):
 
 def main():
     with sync_playwright() as playwright:
-        # CI 环境必须使用 headless=True
         browser = playwright.chromium.launch(
             headless=True,
             args=["--disable-blink-features=AutomationControlled"],
@@ -128,6 +147,7 @@ def main():
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             locale="de-DE",
+            viewport={"width": 1280, "height": 800},
         )
         page = context.new_page()
 
